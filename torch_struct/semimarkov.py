@@ -79,6 +79,8 @@ class SemiMarkov(_Struct):
             last = None
             c = None
             for n in range(0, N):
+                if n >= lengths[b].item():
+                    break
                 if sequence[b, n] == -1:
                     assert n != 0
                     continue
