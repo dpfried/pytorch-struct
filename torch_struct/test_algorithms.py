@@ -1,15 +1,7 @@
 from .cky import CKY
 from .cky_crf import CKY_CRF
 from .deptree import DepTree, deptree_nonproj, deptree_part
-from .linearchain import LinearChain
-
-class LinearChainScan(LinearChain):
-    def __init__(self, *args, **kwargs):
-        super(LinearChainScan, self).__init__(*args, linear_scan=True, **kwargs)
-
-class LinearChainNoScan(LinearChain):
-    def __init__(self, *args, **kwargs):
-        super(LinearChainNoScan, self).__init__(*args, linear_scan=False, **kwargs)
+from .linearchain import LinearChain, LinearChainNoScan
 
 from .semimarkov import SemiMarkov
 from .alignment import Alignment
@@ -37,7 +29,7 @@ lint = integers(min_value=2, max_value=10)
 @given(smint, smint, smint)
 @settings(max_examples=50, deadline=None)
 def test_simple_a(batch, N, C):
-    for model in [LinearChainScan, LinearChainNoScan]:
+    for model in [LinearChain, LinearChainNoScan]:
         vals = torch.ones(batch, N, C, C)
         semiring = StdSemiring
         alpha = model(semiring).sum(vals)
@@ -91,7 +83,7 @@ def test_simple_b(batch, N, K, C):
 
 @given(data())
 def test_entropy(data):
-    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov]))
+    model = data.draw(sampled_from([LinearChain, LinearChainNoScan, SemiMarkov]))
     semiring = EntropySemiring
     struct = model(semiring)
     vals, (batch, N) = model._rand()
@@ -108,7 +100,7 @@ def test_entropy(data):
 
 @given(data())
 def test_kmax(data):
-    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov, DepTree]))
+    model = data.draw(sampled_from([LinearChain, LinearChainNoScan, SemiMarkov, DepTree]))
     K = 2
     semiring = KMaxSemiring(K)
     struct = model(semiring)
@@ -222,7 +214,7 @@ def test_non_proj(data):
 @given(data(), integers(min_value=1, max_value=20))
 def test_parts_from_marginals(data, seed):
     # todo: add CKY, DepTree too?
-    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov]))
+    model = data.draw(sampled_from([LinearChain, LinearChainNoScan, SemiMarkov]))
     struct = model()
     torch.manual_seed(seed)
     vals, (batch, N) = struct._rand()
@@ -279,7 +271,7 @@ def test_parts_from_sequence(data, seed):
 @settings(max_examples=50, deadline=None)
 def test_generic_lengths(data, seed):
     model = data.draw(
-        sampled_from([CKY, Alignment, LinearChainScan, LinearChainNoScan, SemiMarkov, CKY_CRF, DepTree])
+        sampled_from([CKY, Alignment, LinearChain, LinearChainNoScan, SemiMarkov, CKY_CRF, DepTree])
     )
     struct = model()
     torch.manual_seed(seed)
@@ -434,7 +426,7 @@ def test_alignment(data):
 
 
 def test_hmm():
-    for model in [LinearChainScan, LinearChainNoScan]:
+    for model in [LinearChain, LinearChainNoScan]:
         C, V, batch, N = 5, 20, 2, 5
         transition = torch.rand(C, C)
         emission = torch.rand(V, C)
@@ -446,7 +438,7 @@ def test_hmm():
 
 @given(data())
 def test_sparse_max(data):
-    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan]))
+    model = data.draw(sampled_from([LinearChain, LinearChainNoScan]))
     semiring = SparseMaxSemiring
     vals, (batch, N) = model._rand()
     vals.requires_grad_(True)
@@ -463,7 +455,7 @@ def test_sparse_max2():
 
 
 def test_lc_custom():
-    for model in [LinearChainScan, LinearChainNoScan]:
+    for model in [LinearChain, LinearChainNoScan]:
         vals, _ = model._rand()
 
         struct = model(LogSemiring)

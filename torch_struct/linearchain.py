@@ -275,3 +275,7 @@ class LinearChain(_Struct):
     #         )
 
     #     return edge_marginals
+
+class LinearChainNoScan(LinearChain):
+    def __init__(self, semiring=LogSemiring):
+        super(LinearChainNoScan, self).__init__(semiring, linear_scan=False)

@@ -1,7 +1,7 @@
 import torch
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property
-from .linearchain import LinearChain
+from .linearchain import LinearChain, LinearChainNoScan
 from .cky import CKY
 from .semimarkov import SemiMarkov
 from .alignment import Alignment
@@ -240,6 +240,10 @@ class LinearChainCRF(StructDistribution):
     """
 
     struct = LinearChain
+
+
+class LinearChainNoScanCRF(StructDistribution):
+    struct = LinearChainNoScan
 
 
 class AlignmentCRF(StructDistribution):
