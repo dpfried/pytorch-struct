@@ -1,4 +1,4 @@
-# Pytorch-Struct
+# Torch-Struct: Structured Prediction Library 
 
 [![Build Status](https://travis-ci.org/harvardnlp/pytorch-struct.svg?branch=master)](https://travis-ci.org/harvardnlp/pytorch-struct)
 [![Coverage Status](https://coveralls.io/repos/github/harvardnlp/pytorch-struct/badge.svg?branch=master)](https://coveralls.io/github/harvardnlp/pytorch-struct?branch=master)
@@ -8,16 +8,26 @@
   </p>
 
 
-
 A library of tested, GPU implementations of core structured prediction algorithms for deep learning applications.
-(or an implementation of <a href="https://www.cs.jhu.edu/~jason/papers/eisner.spnlp16.pdf">Inside-Outside and Forward-Backward Algorithms Are Just Backprop"<a/>)
 
+* HMM / LinearChain-CRF 
+* HSMM / SemiMarkov-CRF 
+* Dependency Tree-CRF 
+* PCFG Binary Tree-CRF 
+* ...
+
+Designed to be used as efficient batched layers in other PyTorch code. 
+
+[Tutorial paper](https://arxiv.org/abs/2002.00876) describing methodology.
 
 ## Getting Started
 
 
 ```python
 !pip install -qU git+https://github.com/harvardnlp/pytorch-struct
+# Optional CUDA kernels for FastLogSemiring
+!pip install -qU git+https://github.com/harvardnlp/genbmm
+# For plotting.
 !pip install -q matplotlib
 ```
 
@@ -117,25 +127,26 @@ show(dist.marginals.detach()[0].sum(-1))
 
 ## Library
 
+Full docs: http://nlp.seas.harvard.edu/pytorch-struct/
+
 Current distributions implemented:
 
 * LinearChainCRF 
 * SemiMarkovCRF 
 * DependencyCRF 
+* NonProjectiveDependencyCRF
 * TreeCRF 
+* NeuralPCFG / NeuralHMM
 
+Each distribution includes: 
+
+* Argmax, sampling, entropy, partition, masking, log_probs, k-max
 
 Extensions:
 
 * Integration with `torchtext`, `pytorch-transformers`, `dgl`
 * Adapters for generative structured models (CFG / HMM / HSMM)
 * Common tree structured parameterizations TreeLSTM / SpanLSTM
-
-Design Strategy:
-
-1) Minimal efficient python implementatations. 
-2) Batched for GPU.
-3) Code can be ported to other backends
 
 
 ## Low-level API: 
@@ -148,11 +159,24 @@ Everything implemented through semiring dynamic programming.
 * Entropy and first-order semirings. 
 
 
-
-
 ## Examples
 
 * BERT <a href="https://github.com/harvardnlp/pytorch-struct/blob/master/notebooks/BertTagger.ipynb">Part-of-Speech</a> 
 * BERT <a href="https://github.com/harvardnlp/pytorch-struct/blob/master/notebooks/BertDependencies.ipynb">Dependency Parsing</a>
 * <a href="https://github.com/harvardnlp/pytorch-struct/blob/master/notebooks/Unsupervised_CFG.ipynb">Unsupervised Learning</a> 
 * <a href="https://github.com/harvardnlp/pytorch-struct/blob/master/examples/tree.py">Structured VAE </a>
+
+<img src="https://media.giphy.com/media/IdxKpsWBHa5PpjuhHM/giphy.gif">
+
+## Citation
+
+```
+@misc{alex2020torchstruct,
+    title={Torch-Struct: Deep Structured Prediction Library},
+    author={Alexander M. Rush},
+    year={2020},
+    eprint={2002.00876},
+    archivePrefix={arXiv},
+    primaryClass={cs.CL}
+}
+```

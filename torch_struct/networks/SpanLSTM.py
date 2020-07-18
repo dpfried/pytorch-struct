@@ -19,6 +19,10 @@ class Res(nn.Module):
 
 
 class SpanLSTM(torch.nn.Module):
+    """
+    SpanLSTM model.
+    """
+
     def __init__(self, NT, V, H):
         super().__init__()
         self.H = H

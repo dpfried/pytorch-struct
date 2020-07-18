@@ -1,14 +1,68 @@
 import torch
+import math
 from .semirings import LogSemiring
 from torch.autograd import Function
 
 
-# def roll(a, b, N, k, gap=0):
-#     return (a[:, : N - (k + gap), (k + gap) :], b[:, k + gap :, : N - (k + gap)])
+class Get(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, chart, grad_chart, indices):
+        ctx.save_for_backward(grad_chart)
+        out = chart[indices]
+        ctx.indices = indices
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (grad_chart,) = ctx.saved_tensors
+        grad_chart[ctx.indices] += grad_output
+        return grad_chart, None, None
 
 
-# def roll2(a, b, N, k, gap=0):
-#     return (a[:, :, : N - (k + gap), (k + gap) :], b[:, :, k + gap :, : N - (k + gap)])
+class Set(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, chart, indices, vals):
+        chart[indices] = vals
+        ctx.indices = indices
+        return chart
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        z = grad_output[ctx.indices]
+        return None, None, z
+
+
+class Chart:
+    def __init__(self, size, potentials, semiring, cache=True):
+        self.data = semiring.zero_(
+            torch.zeros(
+                *((semiring.size(),) + size),
+                dtype=potentials.dtype,
+                device=potentials.device
+            )
+        )
+        self.grad = self.data.detach().clone().fill_(0.0)
+        self.cache = cache
+
+    def __getitem__(self, ind):
+        I = slice(None)
+        if self.cache:
+            return Get.apply(self.data, self.grad, (I, I) + ind)
+        else:
+            return self.data[(I, I) + ind]
+
+    def __setitem__(self, ind, new):
+        I = slice(None)
+        if self.cache:
+            self.data = Set.apply(self.data, (I, I) + ind, new)
+        else:
+            self.data[(I, I) + ind] = new
+
+    def get(self, ind):
+        return Get.apply(self.data, self.grad, ind)
+
+    def set(self, ind, new):
+        self.data = Set.apply(self.data, ind, new)
 
 
 class _Struct:
@@ -19,6 +73,14 @@ class _Struct:
         score = torch.mul(potentials, parts)
         batch = tuple((score.shape[b] for b in batch_dims))
         return self.semiring.prod(score.view(batch + (-1,)))
+
+    def _bin_length(self, length):
+        log_N = int(math.ceil(math.log(length, 2)))
+        bin_N = int(math.pow(2, log_N))
+        return log_N, bin_N
+
+    def _chart(self, size, potentials, force_grad):
+        return self._make_chart(1, size, potentials, force_grad)[0]
 
     def _make_chart(self, N, size, potentials, force_grad=False):
         return [
@@ -74,7 +136,7 @@ class _Struct:
 
             return DPManual.apply(edge)
 
-    def marginals(self, edge, lengths=None, _autograd=True):
+    def marginals(self, edge, lengths=None, _autograd=True, _raw=False):
         """
         Compute the marginals of a structured model.
 
@@ -90,15 +152,30 @@ class _Struct:
             or self.semiring is not LogSemiring
             or not hasattr(self, "_dp_backward")
         ):
-            v, edges, _ = self._dp(edge, lengths=lengths, force_grad=True)
-            marg = torch.autograd.grad(
-                self.semiring.unconvert(v).sum(dim=0),
-                edges,
-                create_graph=True,
-                only_inputs=True,
-                allow_unused=False,
+            v, edges, _ = self._dp(
+                edge, lengths=lengths, force_grad=True, cache=not _raw
             )
-            return self.semiring.unconvert(self._arrange_marginals(marg))
+            if _raw:
+                all_m = []
+                for k in range(v.shape[0]):
+                    obj = v[k].sum(dim=0)
+
+                    marg = torch.autograd.grad(
+                        obj,
+                        edges,
+                        create_graph=True,
+                        only_inputs=True,
+                        allow_unused=False,
+                    )
+                    all_m.append(self.semiring.unconvert(self._arrange_marginals(marg)))
+                return torch.stack(all_m, dim=0)
+            else:
+                obj = self.semiring.unconvert(v).sum(dim=0)
+                marg = torch.autograd.grad(
+                    obj, edges, create_graph=True, only_inputs=True, allow_unused=False
+                )
+                a_m = self._arrange_marginals(marg)
+                return self.semiring.unconvert(a_m)
         else:
             v, _, alpha = self._dp(edge, lengths=lengths, force_grad=True)
             return self._dp_backward(edge, lengths, alpha)
@@ -110,3 +187,6 @@ class _Struct:
     @staticmethod
     def from_parts(spans):
         return spans, None
+
+    def _arrange_marginals(self, marg):
+        return marg[0]

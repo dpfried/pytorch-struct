@@ -1,76 +1,86 @@
 import torch
-from .helpers import _Struct
-from .semirings import LogSemiring
+from .helpers import _Struct, Chart
 
 A, B = 0, 1
 
 
 class CKY(_Struct):
-    def _dp(self, scores, lengths=None, force_grad=False):
-        terms, rules, roots = scores
+    def _dp(self, scores, lengths=None, force_grad=False, cache=True):
+
         semiring = self.semiring
+
+        # Checks
+        terms, rules, roots = scores
+        rules.requires_grad_(True)
         ssize = semiring.size()
         batch, N, T = terms.shape
         _, NT, _, _ = rules.shape
         S = NT + T
 
         terms, rules, roots = (
-            semiring.convert(terms),
-            semiring.convert(rules),
-            semiring.convert(roots),
+            semiring.convert(terms).requires_grad_(True),
+            semiring.convert(rules).requires_grad_(True),
+            semiring.convert(roots).requires_grad_(True),
         )
         if lengths is None:
-            lengths = torch.LongTensor([N] * batch)
-        beta = self._make_chart(2, (batch, N, N, NT + T), rules, force_grad)
-        span = self._make_chart(N, (batch, N, NT + T), rules, force_grad)
-        rule_use = [
-            self._make_chart(1, (batch, N - w - 1, NT, S, S), rules, force_grad)[0]
-            for w in range(N - 1)
+            lengths = torch.LongTensor([N] * batch).to(terms.device)
+
+        # Charts
+        beta = [
+            Chart((batch, N, N, NT), rules, semiring, cache=cache) for _ in range(2)
         ]
-        top = self._make_chart(1, (batch, NT), rules, force_grad)[0]
-        term_use = self._make_chart(1, (batch, N, T), terms, force_grad)[0]
-        term_use[:] = terms + 0.0
-        beta[A][:, :, :, 0, NT:] = term_use
-        beta[B][:, :, :, N - 1, NT:] = term_use
-        X_Y_Z = rules.view(ssize, batch, 1, NT, S, S)[:, :, :, :, :NT, :NT]
-        X_Y_Z1 = rules.view(ssize, batch, 1, NT, S, S)[:, :, :, :, :NT, NT:]
-        X_Y1_Z = rules.view(ssize, batch, 1, NT, S, S)[:, :, :, :, NT:, :NT]
-        X_Y1_Z1 = rules.view(ssize, batch, 1, NT, S, S)[:, :, :, :, NT:, NT:]
+        span = [None for _ in range(N)]
+        v = (ssize, batch)
+        term_use = terms + 0.0
 
-        # here
+        # Split into NT/T groups
+        NTs = slice(0, NT)
+        Ts = slice(NT, S)
+        rules = rules.view(ssize, batch, 1, NT, S, S)
+
+        def arr(a, b):
+            return rules[..., a, b].contiguous().view(*v + (NT, -1)).transpose(-2, -1)
+
+        matmul = semiring.matmul
+        times = semiring.times
+        X_Y_Z = arr(NTs, NTs)
+        X_Y1_Z = arr(Ts, NTs)
+        X_Y_Z1 = arr(NTs, Ts)
+        X_Y1_Z1 = arr(Ts, Ts)
+
         for w in range(1, N):
-            Y = beta[A][:, :, : N - w, :w, :NT].view(ssize, batch, N - w, w, 1, NT, 1)
-            Z = beta[B][:, :, w:, N - w :, :NT].view(ssize, batch, N - w, w, 1, 1, NT)
-            rule_use[w - 1][:, :, :, :, :NT, :NT] = semiring.times(
-                semiring.sum(semiring.times(Y, Z), dim=3), X_Y_Z
-            )
-            Y = beta[A][:, :, : N - w, w - 1, :NT].view(ssize, batch, N - w, 1, NT, 1)
-            Z = beta[B][:, :, w:, N - 1, NT:].view(ssize, batch, N - w, 1, 1, T)
-            rule_use[w - 1][:, :, :, :, :NT, NT:] = semiring.times(Y, Z, X_Y_Z1)
+            all_span = []
+            v2 = v + (N - w, -1)
 
-            Y = beta[A][:, :, : N - w, 0, NT:].view(ssize, batch, N - w, 1, T, 1)
-            Z = beta[B][:, :, w:, N - w, :NT].view(ssize, batch, N - w, 1, 1, NT)
-            rule_use[w - 1][:, :, :, :, NT:, :NT] = semiring.times(Y, Z, X_Y1_Z)
+            Y = beta[A][: N - w, :w, :]
+            Z = beta[B][w:, N - w :, :]
+            X1 = matmul(matmul(Y.transpose(-2, -1), Z).view(*v2), X_Y_Z)
+            all_span.append(X1)
+
+            Y_term = term_use[..., : N - w, :, None]
+            Z_term = term_use[..., w:, None, :]
+
+            Y = Y[..., -1, :].unsqueeze(-1)
+            X2 = matmul(times(Y, Z_term).view(*v2), X_Y_Z1)
+
+            Z = Z[..., 0, :].unsqueeze(-2)
+            X3 = matmul(times(Y_term, Z).view(*v2), X_Y1_Z)
+            all_span += [X2, X3]
 
             if w == 1:
-                Y = beta[A][:, :, : N - w, w - 1, NT:].view(
-                    ssize, batch, N - w, 1, T, 1
-                )
-                Z = beta[B][:, :, w:, N - w, NT:].view(ssize, batch, N - w, 1, 1, T)
-                rule_use[w - 1][:, :, :, :, NT:, NT:] = semiring.times(Y, Z, X_Y1_Z1)
+                X4 = matmul(times(Y_term, Z_term).view(*v2), X_Y1_Z1)
+                all_span.append(X4)
 
-            rulesmid = rule_use[w - 1].view(ssize, batch, N - w, NT, S * S)
-            span[w] = semiring.sum(rulesmid, dim=4)
-            beta[A][:, :, : N - w, w, :NT] = span[w]
-            beta[B][:, :, w:N, N - w - 1, :NT] = beta[A][:, :, : N - w, w, :NT]
+            span[w] = semiring.sum(torch.stack(all_span, dim=-1))
+            beta[A][: N - w, w, :] = span[w]
+            beta[B][w:N, N - w - 1, :] = span[w]
 
-        top[:] = torch.stack(
-            [beta[A][:, i, 0, l - 1, :NT] for i, l in enumerate(lengths)], dim=1
-        )
+        final = beta[A][0, :, NTs]
+        top = torch.stack([final[:, i, l - 1] for i, l in enumerate(lengths)], dim=1)
         log_Z = semiring.dot(top, roots)
-        return semiring.unconvert(log_Z), (term_use, rule_use, top), beta
+        return log_Z, (term_use, rules, roots, span[1:]), beta
 
-    def marginals(self, scores, lengths=None, _autograd=True):
+    def marginals(self, scores, lengths=None, _autograd=True, _raw=False):
         """
         Compute the marginals of a CFG using CKY.
 
@@ -81,39 +91,63 @@ class CKY(_Struct):
 
         Returns:
             v: b tensor of total sum
-            spans: bxNxT terms, (bxNxNxNTxSxS) rules, bxNT roots
+            spans: bxNxT terms, (bxNTx(NT+S)x(NT+S)) rules, bxNT roots
 
         """
         terms, rules, roots = scores
         batch, N, T = terms.shape
         _, NT, _, _ = rules.shape
-        S = NT + T
-        v, (term_use, rule_use, top), alpha = self._dp(
-            scores, lengths=lengths, force_grad=True
-        )
-        if _autograd or self.semiring is not LogSemiring:
-            marg = torch.autograd.grad(
-                v.sum(dim=0),
-                tuple(rule_use) + (top, term_use),
-                create_graph=True,
-                only_inputs=True,
-                allow_unused=False,
-            )
-            rule_use = marg[:-2]
-            rules = torch.zeros(
-                batch, N, N, NT, S, S, dtype=scores[1].dtype, device=scores[1].device
-            )
-            for w in range(len(rule_use)):
-                rules[:, w, : N - w - 1] = self.semiring.unconvert(rule_use[w])
 
-            term_marg = self.semiring.unconvert(marg[-1])
-            root_marg = self.semiring.unconvert(marg[-2])
+        v, (term_use, rule_use, root_use, spans), alpha = self._dp(
+            scores, lengths=lengths, force_grad=True, cache=not _raw
+        )
+
+        def marginal(obj, inputs):
+            obj = self.semiring.unconvert(obj).sum(dim=0)
+            marg = torch.autograd.grad(
+                obj, inputs, create_graph=True, only_inputs=True, allow_unused=False,
+            )
+
+            spans_marg = torch.zeros(
+                batch, N, N, NT, dtype=scores[1].dtype, device=scores[1].device
+            )
+            span_ls = marg[3:]
+            for w in range(len(span_ls)):
+                x = span_ls[w].sum(dim=0, keepdim=True)
+                spans_marg[:, w, : N - w - 1] = self.semiring.unconvert(x)
+
+            rule_marg = self.semiring.unconvert(marg[0]).squeeze(1)
+            root_marg = self.semiring.unconvert(marg[1])
+            term_marg = self.semiring.unconvert(marg[2])
 
             assert term_marg.shape == (batch, N, T)
             assert root_marg.shape == (batch, NT)
-            return (term_marg, rules, root_marg)
+            assert rule_marg.shape == (batch, NT, NT + T, NT + T)
+            return (term_marg, rule_marg, root_marg, spans_marg)
+
+        inputs = (rule_use, root_use, term_use) + tuple(spans)
+        if _raw:
+            paths = []
+            for k in range(v.shape[0]):
+                obj = v[k : k + 1]
+                marg = marginal(obj, inputs)
+                paths.append(marg[-1])
+            paths = torch.stack(paths, 0)
+            obj = v.sum(dim=0, keepdim=True)
+            term_marg, rule_marg, root_marg, _ = marginal(obj, inputs)
+            return term_marg, rule_marg, root_marg, paths
         else:
-            return self._dp_backward(scores, lengths, alpha, v)
+            return marginal(v, inputs)
+
+    def score(self, potentials, parts):
+        terms, rules, roots = potentials[:3]
+        m_term, m_rule, m_root = parts[:3]
+        b = m_term.shape[0]
+        return (
+            m_term.mul(terms).view(b, -1).sum(-1)
+            + m_rule.mul(rules).view(b, -1).sum(-1)
+            + m_root.mul(roots).view(b, -1).sum(-1)
+        )
 
     @staticmethod
     def to_parts(spans, extra, lengths=None):
@@ -270,13 +304,3 @@ class CKY(_Struct):
         rules = torch.rand(batch, NT, (NT + T), (NT + T))
         roots = torch.rand(batch, NT)
         return (terms, rules, roots), (batch.item(), N.item())
-
-    def score(self, potentials, parts):
-        terms, rules, roots = potentials
-        m_term, m_rule, m_root = parts
-        b = m_term.shape[0]
-        return (
-            m_term.mul(terms).view(b, -1).sum(-1)
-            + m_rule.sum(dim=1).sum(dim=1).mul(rules).view(b, -1).sum(-1)
-            + m_root.mul(roots).view(b, -1).sum(-1)
-        )

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 
-# NeuralCFG From Kim et al
 class Res(nn.Module):
     def __init__(self, H):
         super().__init__()
@@ -20,6 +19,10 @@ class Res(nn.Module):
 
 
 class NeuralCFG(torch.nn.Module):
+    """
+    NeuralCFG From Kim et al
+    """
+
     def __init__(self, V, T, NT, H):
         super().__init__()
         self.NT = NT
@@ -41,9 +44,17 @@ class NeuralCFG(torch.nn.Module):
         T, NT = self.T, self.NT
 
         def terms(words):
-            return torch.einsum(
-                "bnh,th->bnt", self.word_emb[words], self.mlp1(self.term_emb)
-            ).log_softmax(-2)
+            b, n = input.shape[:2]
+            term_prob = (
+                torch.einsum("vh,th->tv", self.word_emb, self.mlp1(self.term_emb))
+                .log_softmax(-1)
+                .unsqueeze(0)
+                .unsqueeze(0)
+                .expand(b, n, self.T, self.V)
+            )
+            indices = input.unsqueeze(2).expand(b, n, self.T).unsqueeze(3)
+            term_prob = torch.gather(term_prob, 3, indices).squeeze(3)
+            return term_prob
 
         def rules(b):
             return (

@@ -29,7 +29,10 @@ extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.githubpages',
               'sphinx.ext.napoleon',
               'sphinxcontrib.jinja',
-              'sphinx.ext.intersphinx'
+              'sphinxcontrib.bibtex',
+              'sphinx.ext.intersphinx',
+              'recommonmark',
+              'nbsphinx'
 ]
 
 
@@ -39,7 +42,7 @@ copyright = '2019, Sasha Rush'
 author = 'Sasha Rush'
 
 # The full version, including alpha/beta/rc tags
-release = '0.2'
+release = '0.4'
 
 
 # -- General configuration ---------------------------------------------------
@@ -47,8 +50,8 @@ release = '0.2'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = [
-]
+# extensions = [
+# ]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
