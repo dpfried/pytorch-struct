@@ -2,6 +2,7 @@ from .cky import CKY
 from .distributions import (
     StructDistribution,
     LinearChainCRF,
+    LinearChainNoScanCRF,
     SemiMarkovCRF,
     DependencyCRF,
     NonProjectiveDependencyCRF,
@@ -13,7 +14,7 @@ from .distributions import (
 from .autoregressive import Autoregressive, AutoregressiveModel
 from .cky_crf import CKY_CRF
 from .deptree import DepTree
-from .linearchain import LinearChain
+from .linearchain import LinearChain, LinearChainNoScan
 from .semimarkov import SemiMarkov
 from .alignment import Alignment
 from .rl import SelfCritical
