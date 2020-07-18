@@ -2,6 +2,15 @@ from .cky import CKY
 from .cky_crf import CKY_CRF
 from .deptree import DepTree, deptree_nonproj, deptree_part
 from .linearchain import LinearChain
+
+class LinearChainScan(LinearChain):
+    def __init__(self, *args, **kwargs):
+        super(LinearChainScan, self).__init__(*args, linear_scan=True, **kwargs)
+
+class LinearChainNoScan(LinearChain):
+    def __init__(self, *args, **kwargs):
+        super(LinearChainNoScan, self).__init__(*args, linear_scan=False, **kwargs)
+
 from .semimarkov import SemiMarkov
 from .alignment import Alignment
 from .semirings import (
@@ -28,15 +37,16 @@ lint = integers(min_value=2, max_value=10)
 @given(smint, smint, smint)
 @settings(max_examples=50, deadline=None)
 def test_simple_a(batch, N, C):
-    vals = torch.ones(batch, N, C, C)
-    semiring = StdSemiring
-    alpha = LinearChain(semiring).sum(vals)
-    c = pow(C, N + 1)
-    print(c)
-    assert (alpha == c).all()
-    LinearChain(SampledSemiring).marginals(vals)
+    for model in [LinearChainScan, LinearChainNoScan]:
+        vals = torch.ones(batch, N, C, C)
+        semiring = StdSemiring
+        alpha = model(semiring).sum(vals)
+        c = pow(C, N + 1)
+        print(c)
+        assert (alpha == c).all()
+        model(SampledSemiring).marginals(vals)
 
-    LinearChain(MultiSampledSemiring).marginals(vals)
+        model(MultiSampledSemiring).marginals(vals)
 
 
 @given(smint, smint, smint, smint)
@@ -81,7 +91,7 @@ def test_simple_b(batch, N, K, C):
 
 @given(data())
 def test_entropy(data):
-    model = data.draw(sampled_from([LinearChain, SemiMarkov]))
+    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov]))
     semiring = EntropySemiring
     struct = model(semiring)
     vals, (batch, N) = model._rand()
@@ -98,7 +108,7 @@ def test_entropy(data):
 
 @given(data())
 def test_kmax(data):
-    model = data.draw(sampled_from([LinearChain, SemiMarkov, DepTree]))
+    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov, DepTree]))
     K = 2
     semiring = KMaxSemiring(K)
     struct = model(semiring)
@@ -212,7 +222,7 @@ def test_non_proj(data):
 @given(data(), integers(min_value=1, max_value=20))
 def test_parts_from_marginals(data, seed):
     # todo: add CKY, DepTree too?
-    model = data.draw(sampled_from([LinearChain, SemiMarkov]))
+    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan, SemiMarkov]))
     struct = model()
     torch.manual_seed(seed)
     vals, (batch, N) = struct._rand()
@@ -269,7 +279,7 @@ def test_parts_from_sequence(data, seed):
 @settings(max_examples=50, deadline=None)
 def test_generic_lengths(data, seed):
     model = data.draw(
-        sampled_from([CKY, Alignment, LinearChain, SemiMarkov, CKY_CRF, DepTree])
+        sampled_from([CKY, Alignment, LinearChainScan, LinearChainNoScan, SemiMarkov, CKY_CRF, DepTree])
     )
     struct = model()
     torch.manual_seed(seed)
@@ -424,18 +434,19 @@ def test_alignment(data):
 
 
 def test_hmm():
-    C, V, batch, N = 5, 20, 2, 5
-    transition = torch.rand(C, C)
-    emission = torch.rand(V, C)
-    init = torch.rand(C)
-    observations = torch.randint(0, V, (batch, N))
-    out = LinearChain.hmm(transition, emission, init, observations)
-    LinearChain().sum(out)
+    for model in [LinearChainScan, LinearChainNoScan]:
+        C, V, batch, N = 5, 20, 2, 5
+        transition = torch.rand(C, C)
+        emission = torch.rand(V, C)
+        init = torch.rand(C)
+        observations = torch.randint(0, V, (batch, N))
+        out = LinearChain.hmm(transition, emission, init, observations)
+        model().sum(out)
 
 
 @given(data())
 def test_sparse_max(data):
-    model = data.draw(sampled_from([LinearChain]))
+    model = data.draw(sampled_from([LinearChainScan, LinearChainNoScan]))
     semiring = SparseMaxSemiring
     vals, (batch, N) = model._rand()
     vals.requires_grad_(True)
@@ -452,60 +463,60 @@ def test_sparse_max2():
 
 
 def test_lc_custom():
-    model = LinearChain
-    vals, _ = model._rand()
+    for model in [LinearChainScan, LinearChainNoScan]:
+        vals, _ = model._rand()
 
-    struct = LinearChain(LogSemiring)
-    marginals = struct.marginals(vals)
-    s = struct.sum(vals)
+        struct = model(LogSemiring)
+        marginals = struct.marginals(vals)
+        s = struct.sum(vals)
 
-    struct = LinearChain(CheckpointSemiring(LogSemiring, 1))
-    marginals2 = struct.marginals(vals)
-    s2 = struct.sum(vals)
-    assert torch.isclose(s, s2).all()
-    assert torch.isclose(marginals, marginals2).all()
+        struct = model(CheckpointSemiring(LogSemiring, 1))
+        marginals2 = struct.marginals(vals)
+        s2 = struct.sum(vals)
+        assert torch.isclose(s, s2).all()
+        assert torch.isclose(marginals, marginals2).all()
 
-    struct = LinearChain(CheckpointShardSemiring(LogSemiring, 1))
-    marginals2 = struct.marginals(vals)
-    s2 = struct.sum(vals)
-    assert torch.isclose(s, s2).all()
-    assert torch.isclose(marginals, marginals2).all()
+        struct = model(CheckpointShardSemiring(LogSemiring, 1))
+        marginals2 = struct.marginals(vals)
+        s2 = struct.sum(vals)
+        assert torch.isclose(s, s2).all()
+        assert torch.isclose(marginals, marginals2).all()
 
-    # struct = LinearChain(LogMemSemiring)
-    # marginals2 = struct.marginals(vals)
-    # s2 = struct.sum(vals)
-    # assert torch.isclose(s, s2).all()
-    # assert torch.isclose(marginals, marginals).all()
+        # struct = model(LogMemSemiring)
+        # marginals2 = struct.marginals(vals)
+        # s2 = struct.sum(vals)
+        # assert torch.isclose(s, s2).all()
+        # assert torch.isclose(marginals, marginals).all()
 
-    # struct = LinearChain(LogMemSemiring)
-    # marginals = struct.marginals(vals)
-    # s = struct.sum(vals)
+        # struct = model(LogMemSemiring)
+        # marginals = struct.marginals(vals)
+        # s = struct.sum(vals)
 
-    # struct = LinearChain(LogSemiringKO)
-    # marginals2 = struct.marginals(vals)
-    # s2 = struct.sum(vals)
-    # assert torch.isclose(s, s2).all()
-    # assert torch.isclose(marginals, marginals).all()
-    # print(marginals)
-    # print(marginals2)
+        # struct = model(LogSemiringKO)
+        # marginals2 = struct.marginals(vals)
+        # s2 = struct.sum(vals)
+        # assert torch.isclose(s, s2).all()
+        # assert torch.isclose(marginals, marginals).all()
+        # print(marginals)
+        # print(marginals2)
 
-    # struct = LinearChain(LogSemiring)
-    # marginals = struct.marginals(vals)
-    # s = struct.sum(vals)
+        # struct = model(LogSemiring)
+        # marginals = struct.marginals(vals)
+        # s = struct.sum(vals)
 
-    # struct = LinearChain(LogSemiringKO)
-    # marginals2 = struct.marginals(vals)
-    # s2 = struct.sum(vals)
-    # assert torch.isclose(s, s2).all()
-    # print(marginals)
-    # print(marginals2)
+        # struct = model(LogSemiringKO)
+        # marginals2 = struct.marginals(vals)
+        # s2 = struct.sum(vals)
+        # assert torch.isclose(s, s2).all()
+        # print(marginals)
+        # print(marginals2)
 
-    # struct = LinearChain(MaxSemiring)
-    # marginals = struct.marginals(vals)
-    # s = struct.sum(vals)
+        # struct = model(MaxSemiring)
+        # marginals = struct.marginals(vals)
+        # s = struct.sum(vals)
 
-    # struct = LinearChain(MaxSemiringKO)
-    # marginals2 = struct.marginals(vals)
-    # s2 = struct.sum(vals)
-    # assert torch.isclose(s, s2).all()
-    # assert torch.isclose(marginals, marginals2).all()
+        # struct = model(MaxSemiringKO)
+        # marginals2 = struct.marginals(vals)
+        # s2 = struct.sum(vals)
+        # assert torch.isclose(s, s2).all()
+        # assert torch.isclose(marginals, marginals2).all()

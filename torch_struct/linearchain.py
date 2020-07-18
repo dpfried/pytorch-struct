@@ -19,6 +19,7 @@ Example use cases:
 
 import torch
 from .helpers import _Struct
+from .semirings import LogSemiring
 
 
 class LinearChain(_Struct):
@@ -26,6 +27,9 @@ class LinearChain(_Struct):
     Represents structured linear-chain CRFs, generalizing HMMs smoothing, tagging models,
     and anything with chain-like dynamics.
     """
+    def __init__(self, semiring=LogSemiring, linear_scan=True):
+        super(LinearChain, self).__init__(semiring)
+        self.linear_scan = linear_scan
 
     def _check_potentials(self, edge, lengths=None):
         batch, N_1, C, C2 = edge.shape
@@ -44,7 +48,10 @@ class LinearChain(_Struct):
         return edge, batch, N, C, lengths
 
     def _dp(self, log_potentials, lengths=None, force_grad=False, cache=True):
-        return self._dp_scan(log_potentials, lengths, force_grad)
+        if self.linear_scan:
+            return self._dp_scan(log_potentials, lengths, force_grad)
+        else:
+            return self._dp_standard(log_potentials, lengths, force_grad)
 
     def _dp_scan(self, log_potentials, lengths=None, force_grad=False):
         "Compute forward pass by linear scan"
@@ -212,36 +219,28 @@ class LinearChain(_Struct):
             enum_lengths,
         )
 
-    ## For reference
-    #
-    # def _dp_standard(self, edge, lengths=None, force_grad=False):
-    #     semiring = self.semiring
-    #     ssize = semiring.size()
-    #     edge, batch, N, C, lengths = self._check_potentials(edge, lengths)
+    def _dp_standard(self, edge, lengths=None, force_grad=False):
+        semiring = self.semiring
+        ssize = semiring.size()
+        edge, batch, N, C, lengths = self._check_potentials(edge, lengths)
 
-    #     alpha = self._make_chart(N, (batch, C), edge, force_grad)
-    #     edge_store = self._make_chart(N - 1, (batch, C, C), edge, force_grad)
+        alpha = self._make_chart(N, (batch, C), edge, force_grad)
+        edge_store = self._make_chart(N - 1, (batch, C, C), edge, force_grad)
 
-    #     semiring.one_(alpha[0].data)
+        semiring.one_(alpha[0].data)
 
-    #     for n in range(1, N):
-    #         edge_store[n - 1][:] = semiring.times(
-    #             alpha[n - 1].view(ssize, batch, 1, C),
-    #             edge[:, :, n - 1].view(ssize, batch, C, C),
-    #         )
-    #         alpha[n][:] = semiring.sum(edge_store[n - 1])
+        for n in range(1, N):
+            edge_store[n - 1][:] = semiring.times(
+                alpha[n - 1].view(ssize, batch, 1, C),
+                edge[:, :, n - 1].view(ssize, batch, C, C),
+            )
+            alpha[n][:] = semiring.sum(edge_store[n - 1])
 
-    #     for n in range(1, N):
-    #         edge_store[n - 1][:] = semiring.times(
-    #             alpha[n - 1].view(ssize, batch, 1, C),
-    #             edge[:, :, n - 1].view(ssize, batch, C, C),
-    #         )
-    #         alpha[n][:] = semiring.sum(edge_store[n - 1])
-
-    #     ret = [alpha[lengths[i] - 1][:, i] for i in range(batch)]
-    #     ret = torch.stack(ret, dim=1)
-    #     v = semiring.sum(ret)
-    #     return v, edge_store, alpha
+        ret = [alpha[lengths[i] - 1][:, i] for i in range(batch)]
+        ret = torch.stack(ret, dim=1)
+        v = semiring.sum(ret)
+        #return v, edge_store, alpha
+        return v, [edge], None
 
     # def _dp_backward(self, edge, lengths, alpha_in, v=None):
     #     semiring = self.semiring
