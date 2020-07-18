@@ -47,6 +47,24 @@ class StructDistribution(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
+    def score(self, events):
+        """
+        Compute (unnormalized) scores from events :math:`f(z)`.
+
+        Parameters:
+            events (tensor): One-hot events (*sample_shape x batch_shape x event_shape*)
+
+        Returns:
+            log_probs (*sample_shape x batch_shape*)
+        """
+        d = events.dim()
+        batch_dims = range(d - len(self.event_shape))
+        return self._struct().score(
+            self.log_potentials,
+            events.type_as(self.log_potentials),
+            batch_dims=batch_dims,
+        )
+
     def log_prob(self, value):
         """
         Compute log probability over values :math:`p(z)`.
@@ -58,14 +76,7 @@ class StructDistribution(Distribution):
             log_probs (*sample_shape x batch_shape*)
         """
 
-        d = value.dim()
-        batch_dims = range(d - len(self.event_shape))
-        v = self._struct().score(
-            self.log_potentials,
-            value.type_as(self.log_potentials),
-            batch_dims=batch_dims,
-        )
-        return v - self.partition
+        return self.score(value) - self.partition
 
     @lazy_property
     def entropy(self):
